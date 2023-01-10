@@ -48,6 +48,9 @@ module NetIMAPTestHelpers
               parser = Net::IMAP::ResponseParser.new
               actual = parser.parse response
               assert_equal expected, actual
+            rescue Test::Unit::AssertionFailedError
+              puts YAML.dump name => {response: response, expected: actual}
+              raise
             end
           end
 
