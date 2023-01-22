@@ -359,6 +359,13 @@ module Net
       # the #accept version of #atom
       def atom?; -combine_adjacent(*ATOM_TOKENS) if lookahead?(*ATOM_TOKENS) end
 
+      # filter-name           =  1*<any ATOM-CHAR except "/">
+      #                       ;; Note that filter-name disallows UTF-8 or
+      #                       ;; the following characters: "(", ")", "{",
+      #                       ;; " ", "%", "*", "]".  See definition of
+      #                       ;; ATOM-CHAR [RFC3501].
+      alias filter_name atom # TODO: disallow "/"
+
       # Returns <tt>atom.upcase</tt>
       def case_insensitive__atom; -combine_adjacent(*ATOM_TOKENS).upcase end
 
@@ -412,6 +419,11 @@ module Net
       def case_insensitive__nstring
         NIL? ? nil : case_insensitive__string
       end
+
+      # See https://www.rfc-editor.org/errata/rfc3501
+      #
+      # charset = atom / quoted
+      def charset; quoted? || atom end
 
       # valid number ranges are not enforced by parser
       #   number64        = 1*DIGIT
@@ -1473,67 +1485,170 @@ module Net
         end
       end
 
-      # See https://www.rfc-editor.org/errata/rfc3501
+      # TODO: backtrack on parse failure or unexpected data, using
+      #       resp_code__unhandled
+      # TODO: Profile Guided Optimization:
+      #       collect frequency data, and order by most to least frequent
       #
-      # resp-text-code  = "ALERT" /
-      #                   "BADCHARSET" [SP "(" charset *(SP charset) ")" ] /
-      #                   capability-data / "PARSE" /
-      #                   "PERMANENTFLAGS" SP "("
-      #                   [flag-perm *(SP flag-perm)] ")" /
-      #                   "READ-ONLY" / "READ-WRITE" / "TRYCREATE" /
-      #                   "UIDNEXT" SP nz-number / "UIDVALIDITY" SP nz-number /
-      #                   "UNSEEN" SP nz-number /
-      #                   atom [SP 1*<any TEXT-CHAR except "]">]
+      # RFC3501 (See https://www.rfc-editor.org/errata/rfc3501):
+      #   resp-text-code   = "ALERT" /
+      #                      "BADCHARSET" [SP "(" charset *(SP charset) ")" ] /
+      #                      capability-data / "PARSE" /
+      #                      "PERMANENTFLAGS" SP "(" [flag-perm *(SP flag-perm)] ")" /
+      #                      "READ-ONLY" / "READ-WRITE" / "TRYCREATE" /
+      #                      "UIDNEXT" SP nz-number / "UIDVALIDITY" SP nz-number /
+      #                      "UNSEEN" SP nz-number /
+      #                      atom [SP 1*<any TEXT-CHAR except "]">]
+      #   capability-data  = "CAPABILITY" *(SP capability) SP "IMAP4rev1"
+      #                      *(SP capability)
+      #   resp-text-code  =/ "UNAVAILABLE" / "AUTHENTICATIONFAILED" /
+      #                     "AUTHORIZATIONFAILED" / "EXPIRED" /
+      #                     "PRIVACYREQUIRED" / "CONTACTADMIN" / "NOPERM" /
+      #                     "INUSE" / "EXPUNGEISSUED" / "CORRUPTION" /
+      #                     "SERVERBUG" / "CLIENTBUG" / "CANNOT" /
+      #                     "LIMIT" / "OVERQUOTA" / "ALREADYEXISTS" /
+      #                     "NONEXISTENT"
+      # RFC9051:
+      #   resp-text-code   = "ALERT" /
+      #                      "BADCHARSET" [SP "(" charset *(SP charset) ")" ] /
+      #                      capability-data / "PARSE" /
+      #                      "PERMANENTFLAGS" SP "(" [flag-perm *(SP flag-perm)] ")" /
+      #                      "READ-ONLY" / "READ-WRITE" / "TRYCREATE" /
+      #                      "UIDNEXT" SP nz-number / "UIDVALIDITY" SP nz-number /
+      #                      resp-code-apnd / resp-code-copy / "UIDNOTSTICKY" /
+      #                      "UNAVAILABLE" / "AUTHENTICATIONFAILED" /
+      #                      "AUTHORIZATIONFAILED" / "EXPIRED" /
+      #                      "PRIVACYREQUIRED" / "CONTACTADMIN" / "NOPERM" /
+      #                      "INUSE" / "EXPUNGEISSUED" / "CORRUPTION" /
+      #                      "SERVERBUG" / "CLIENTBUG" / "CANNOT" /
+      #                      "LIMIT" / "OVERQUOTA" / "ALREADYEXISTS" /
+      #                      "NONEXISTENT" / "NOTSAVED" / "HASCHILDREN" /
+      #                      "CLOSED" /
+      #                      "UNKNOWN-CTE" /
+      #                      atom [SP 1*<any TEXT-CHAR except "]">]
+      #   capability-data  = "CAPABILITY" *(SP capability) SP "IMAP4rev2"
+      #                      *(SP capability)
+      # RFC4315: UIDPLUS, IMAP4rev2 (RFC9051)
+      #   resp-code-apnd   = "APPENDUID" SP nz-number SP append-uid
+      # RFC4315: UIDPLUS, IMAP4rev2 (RFC9051)
+      #   resp-code-copy   = "COPYUID" SP nz-number SP uid-set SP uid-set
+      # RFC7162: CONDSTORE:                 "NOMODSEQ"
+      # RFC4469: CATENATE:                  "TOOBIG"
+      # RFC4978: COMPRESS=DEFLATE:          "COMPRESSIONACTIVE"
+      # RFC5255: I18NLEVEL={1,2}, LANGUAGE: "BADCOMPARATOR"
+      # RFC5259: CONVERT:                   "TEMPFAIL"
+      # RFC5565: NOTIFY:                    "NOTIFICATIONOVERFLOW"
+      # RFC6154: SPECIAL-USE:               "USEATTR"
+      # RFC5259: CONVERT, codes with simple numeric data
+      #   "MAXCONVERTMESSAGES" SP nz-number
+      #   "MAXCONVERTPARTS"    SP nz-number
+      # RFC7162: CONDSTORE, QRESYNC:
+      #   "HIGHESTMODSEQ" SP mod-sequence-value
+      # RFC7162: CONDSTORE, QRESYNC
+      #   "MODIFIED" SP sequence-set
+      # RFC8474: OBJECTID
+      #   "MAILBOXID" SP "(" objectid ")"
+      # RFC5267: CONTEXT
+      #   "NOUPDATE" SP quoted
+      # RFC5566: FILTERS
+      #   "UNDEFINED-FILTER" SP filter-name
+      # RFC4467: URLAUTH
+      #   "URLMECH" SP "INTERNAL" *(SP mechanism ["=" base64])
+      # RFC4469: CATENATE
+      #   "BADURL" SP url-resp-text
+      # RFC5564: METADATA
+      #   "METADATA" SP "LONGENTRIES" SP number
+      #                       ; new response codes for GETMETADATA
+      #   "METADATA" SP ("MAXSIZE" SP number / "TOOMANY" / "NOPRIVATE")
+      #                       ; new response codes for SETMETADATA
+      #                       ; failures
+      # RFC5565: NOTIFY
+      #   "BADEVENT" SP "(" event-name *(SP event-name) ")"
       #
-      # +UIDPLUS+ ABNF:: https://www.rfc-editor.org/rfc/rfc4315.html#section-4
-      #   resp-text-code  =/ resp-code-apnd / resp-code-copy / "UIDNOTSTICKY"
+      #   atom [SP 1*<any TEXT-CHAR except "]">]
       def resp_text_code
-        token = match(T_ATOM)
-        name = token.value.upcase
-        case name
-        when /\A(?:ALERT|PARSE|READ-ONLY|READ-WRITE|TRYCREATE|NOMODSEQ)\z/n
-          result = ResponseCode.new(name, nil)
-        when /\A(?:BADCHARSET)\z/n
-          result = ResponseCode.new(name, charset_list)
-        when /\A(?:CAPABILITY)\z/ni
-          result = ResponseCode.new(name, capability__list)
-        when /\A(?:PERMANENTFLAGS)\z/n
-          match(T_SPACE)
-          result = ResponseCode.new(name, flag_list)
-        when /\A(?:UIDVALIDITY|UIDNEXT|UNSEEN)\z/n
-          match(T_SPACE)
-          result = ResponseCode.new(name, number)
-        when /\A(?:APPENDUID)\z/n
-          result = ResponseCode.new(name, resp_code_apnd__data)
-        when /\A(?:COPYUID)\z/n
-          result = ResponseCode.new(name, resp_code_copy__data)
-        else
-          token = lookahead
-          if token.symbol == T_SPACE
-            shift_token
-            result = ResponseCode.new(name, text_chars_except_rbra)
-          else
-            result = ResponseCode.new(name, nil)
+        data =
+          case name = case_insensitive__atom
+
+          when "ALERT", "PARSE", "READ-ONLY", "READ-WRITE",      # rev1, rev2
+            "TRYCREATE",                                         # rev1, rev2
+            "UNAVAILABLE", "AUTHENTICATIONFAILED",               # RFC5530, rev2
+            "AUTHORIZATIONFAILED", "EXPIRED", "PRIVACYREQUIRED", # RFC5530, rev2
+            "CONTACTADMIN", "NOPERM", "INUSE", "EXPUNGEISSUED",  # RFC5530, rev2
+            "CORRUPTION", "SERVERBUG", "CLIENTBUG", "CANNOT",    # RFC5530, rev2
+            "LIMIT", "OVERQUOTA", "ALREADYEXISTS",               # RFC5530, rev2
+            "NONEXISTENT",                                       # RFC5530, rev2
+            "CLOSED",                                            # rev2, QRESYNC
+            "NOTSAVED",                                          # rev2, SEARCHRES
+            "UIDNOTSTICKY",                                      # rev2, UIDPLUS
+            "UNKNOWN-CTE",                                       # rev2, BINARY
+            "HASCHILDREN",                                       # rev2
+            "NOMODSEQ",                                          # CONDSTORE
+            "USEATTR"                                            # SPECIAL-USE
+
+          when "CAPABILITY"         then capability__list        # rev1, rev2
+          when "PERMANENTFLAGS"     then SP!; flag_perm__list    # rev1, rev2
+          when "UIDNEXT"            then SP!; nz_number          # rev1, rev2
+          when "UIDVALIDITY"        then SP!; nz_number          # rev1, rev2
+          when "UNSEEN"             then SP!; nz_number          # rev1
+          when "APPENDUID"          then resp_code_apnd__data    # UIDPLUS, rev2
+          when "COPYUID"            then resp_code_copy__data    # UIDPLUS, rev2
+          when "BADCHARSET"         then resp_code__badcharset   # rev1, rev2
+
+          when "HIGHESTMODSEQ"      then SP!; mod_sequence_value # CONDSTORE
+          when "MODIFIED"           then SP!; sequence_set       # CONDSTORE
+          when "MAILBOXID"          then SP!; parens__objectid   # OBJECTID
+
+          when "COMPRESSIONACTIVE"                               # COMPRESS=
+
+          when "BADURL"             then SP!; url_rep_text       # CATENATE
+          when "TOOBIG"                                          # CATENATE
+
+          when "MAXCONVERTMESSAGES" then SP!; nz_number          # CONVERT
+          when "MAXCONVERTPARTS"    then SP!; nz_number          # CONVERT
+          when "NOUPDATE"           then SP!; quoted             # CONTEXT
+
+          when "TEMPFAIL"                                        # CONVERT
+
+          when "UNDEFINED-FILTER"   then SP!; filter_name        # FILTERS
+
+          when "METADATA"           then resp_code__metadata     # METADATA
+
+          when "BADEVENT"           then resp_code__badevent     # NOTIFY
+          when "NOTIFICATIONOVERFLOW"                            # NOTIFY
+
+          when "URLMECH"            then resp_code__urlmech      # URLAUTH
+
+          when "BADCOMPARATOR"                                   # I18NLEVEL=
+
+                                    else resp_code__unhandled    # rev1, rev2
           end
-        end
-        return result
+
+        ResponseCode.new(name, data)
       end
 
-      # 1*<any TEXT-CHAR except "]">
+      # RFC3501 & RFC9051, in resp-text-code:
+      #   [SP 1*<any TEXT-CHAR except "]">]
+      #
+      # TODO: return UnparsedData
+      def resp_code__unhandled
+        SP? and match_re(CTEXT_REGEXP, '1*<any TEXT-CHAR except "]">')[0]
+      end
+
       def text_chars_except_rbra
         match_re(CTEXT_REGEXP, '1*<any TEXT-CHAR except "]">')[0]
       end
 
-      def charset_list
-        result = []
-        if accept(T_SPACE)
-          match(T_LPAR)
-          result << charset
-          while accept(T_SPACE)
-            result << charset
-          end
-          match(T_RPAR)
-        end
+      # TODO: should unhandled response code data warn?
+      alias resp_code__badevent       resp_code__unhandled
+      alias resp_code__metadata       resp_code__unhandled
+      alias resp_code__urlmech        resp_code__unhandled
+      alias url_rep_text              text_chars_except_rbra
+
+      # "(" charset *(SP charset) ")"
+      def resp_code__badcharset
+        SP? or return []
+        lpar; result = [charset]; while SP? do result << charset end; rpar
         result
       end
 
@@ -1639,16 +1754,10 @@ module Net
         end
       end
 
+      alias flag_perm__list flag_list # not quite correct
 
-      # See https://www.rfc-editor.org/errata/rfc3501
-      #
-      # charset = atom / quoted
-      def charset
-        if token = accept(T_QUOTED)
-          token.value
-        else
-          atom
-        end
+      def parens__objectid
+        lpar; _ = objectid; rpar; _
       end
 
       # RFC7162:
@@ -1664,6 +1773,16 @@ module Net
       alias permsg_modsequence mod_sequence_value
 
       def parens__modseq; lpar; _ = permsg_modsequence; rpar; _ end
+
+      # RFC7162:
+      # mod-sequence-valzer = "0" / mod-sequence-value
+      alias mod_sequence_valzer number64
+
+      # RFC8474:
+      # objectid = 1*255(ALPHA / DIGIT / "_" / "-")
+      #         ; characters in object identifiers are case
+      #         ; significant
+      alias objectid atom
 
       # RFC-4315 (UIDPLUS) or RFC9051 (IMAP4rev2):
       #      uid-set         = (uniqueid / uid-range) *("," uid-set)
