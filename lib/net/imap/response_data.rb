@@ -292,7 +292,7 @@ module Net
     #
     # Net::IMAP#list returns an array of MailboxList objects.
     #
-    class MailboxList < Struct.new(:attr, :delim, :name)
+    class MailboxList < Struct.new(:attr, :delim, :name, :extended_data)
       ##
       # method: attr
       # :call-seq: attr -> array of Symbols
@@ -317,6 +317,44 @@ module Net
       # :call-seq: name -> string
       #
       # Returns the mailbox name.
+
+      ##
+      # method: extended_data
+      # :call-seq: extended_data -> nil or Hash[String, Array]
+      #
+      # Returns extended data about the mailbox, if any was given.
+      #
+      # Extension data with unknown tags will be parsed using the generic
+      # "tagged-ext" syntax.  The format of unknown extension data may be
+      # changed---without warning---by future +net-imap+ releases.
+      #
+      # Data for known extensions will have an accessor method with the same
+      # name.  These methods should generally be prefered over of extended_data:
+      # * #childinfo
+      # * #oldname
+      #
+      # See +LIST-EXTENDED+ RFC5258,
+      # +NOTIFY+ RFC5465,
+      # or +IMAP4rev2+ RFC9051.
+
+      ##
+      # The CHILDINFO extended data item in a LIST response describes the
+      # selection criteria that has caused it to be returned and indicates
+      # that the mailbox has at least one descendant mailbox that matches the
+      # selection criteria.
+      #
+      # See +LIST-EXTENDED+ RFC5258
+      # or +IMAP4rev2+ RFC9051.
+      def childinfo; extended_data&.[]("CHILDINFO")&.first end
+
+      ##
+      # Returns the previous mailbox name for a renamed mailbox, or the
+      # denormalized client-provided mailbox name when it differs from the
+      # server's normalized name.
+      #
+      # See +NOTIFY+ RFC5465
+      # or +IMAP4rev2+ RFC9051.
+      def oldname; extended_data&.[]("OLDNAME")&.first end
     end
 
     # Net::IMAP::MailboxQuota represents contents of GETQUOTA response.

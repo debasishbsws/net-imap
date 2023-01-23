@@ -1285,19 +1285,88 @@ module Net
       alias mailbox_data__lsub  mailbox_data__list
       alias mailbox_data__xlist mailbox_data__list
 
+      # RFC3501
+      #   mailbox-list    = "(" [mbx-list-flags] ")" SP
+      #                      (DQUOTE QUOTED-CHAR DQUOTE / nil) SP mailbox
+      # RFC5258 (LIST-EXTENDED), RFC9051 (IMAP4rev2)
+      #   mailbox-list =  "(" [mbx-list-flags] ")" SP
+      #               (DQUOTE QUOTED-CHAR DQUOTE / nil) SP mailbox
+      #               [SP mbox-list-extended]
       def mailbox_list
-        attr = flag_list
-        match(T_SPACE)
-        token = match(T_QUOTED, T_NIL)
-        if token.symbol == T_NIL
-          delim = nil
-        else
-          delim = token.value
-        end
-        match(T_SPACE)
-        name = astring
-        return MailboxList.new(attr, delim, name)
+        true and flags = parens__mbx_list_flags
+        SP!  and delim = nquoted_char
+        SP!  and name  = mailbox
+        SP?  and ext   = mbox_list_extended
+        MailboxList.new(flags, delim, name, ext)
       end
+
+      # >>>
+      #   mbox-list-extended =  "(" [mbox-list-extended-item
+      #                         *(SP mbox-list-extended-item)] ")"
+      def mbox_list_extended
+        lpar; rpar? and return {}
+        items = [mbox_list_extended_item]
+        while SP? do items << mbox_list_extended_item end
+        rpar
+        items.each_with_object({}) do |(tag, val), hash|
+          (hash[tag] ||= []) << val
+        end
+      end
+
+      #   mbox-list-extended-item = mbox-list-extended-item-tag SP
+      #                              tagged-ext-val
+      def mbox_list_extended_item
+        tag = mbox_list_extended_item_tag; SP!
+        val =
+          case tag
+          when "CHILDINFO" then childinfo_extended_item__val
+          when "OLDNAME"   then oldname_extended_item__val
+          else                  tagged_ext_val
+          end
+        [tag, val]
+      end
+
+      #   childinfo-extended-item =  "CHILDINFO" SP "("
+      #               list-select-base-opt-quoted
+      #               *(SP list-select-base-opt-quoted) ")"
+      #               ; Extended data item (mbox-list-extended-item)
+      #               ; returned when the RECURSIVEMATCH
+      #               ; selection option is specified.
+      #               ; Note 1: the CHILDINFO extended data item tag can be
+      #               ; returned with or without surrounding quotes, as per
+      #               ; mbox-list-extended-item-tag production.
+      #               ; Note 2: The selection options are always returned
+      #               ; quoted, unlike their specification in
+      #               ; the extended LIST command.
+      def childinfo_extended_item__val
+        lpar
+        list = [quoted.upcase]
+        list << quoted.upcase while SP?
+        rpar
+        list
+      end
+
+      #   oldname-extended-item =  "OLDNAME" SP "(" mailbox ")"
+      #                       ; Extended data item (mbox-list-extended-item)
+      #                       ; returned in a LIST response when a mailbox is
+      #                       ; renamed or deleted. Also returned when
+      #                       ; the server canonicalized the provided mailbox
+      #                       ; name.
+      #                       ; Note 1: the OLDNAME tag can be returned
+      #                       ; with or without surrounding quotes, as per
+      #                       ; mbox-list-extended-item-tag production.
+      def oldname_extended_item__val
+        lpar; _ = mailbox; rpar; _
+      end
+
+      # mbox-list-extended-item-tag = astring
+      #                ; The content MUST conform to either
+      #                ; "eitem-vendor-tag" or "eitem-standard-tag"
+      #                ; ABNF productions.
+      def mbox_list_extended_item_tag; astring.upcase end
+
+      # TODO: match only one single char
+      alias nquoted_char quoted
 
       def getquota_response
         # If quota never established, get back
