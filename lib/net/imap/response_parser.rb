@@ -186,6 +186,54 @@ module Net
         CODE_TEXT_CHAR    = TEXT_CHAR - RESP_SPECIALS
         CODE_TEXT         = /#{CODE_TEXT_CHAR}+/n
 
+        # flag            = "\Answered" / "\Flagged" / "\Deleted" /
+        #                   "\Seen" / "\Draft" / flag-keyword / flag-extension
+        #                     ; Does not include "\Recent"
+        # flag-extension  = "\" atom
+        #                     ; Future expansion.  Client implementations
+        #                     ; MUST accept flag-extension flags.  Server
+        #                     ; implementations MUST NOT generate
+        #                     ; flag-extension flags except as defined by
+        #                     ; a future Standard or Standards Track
+        #                     ; revisions of this specification.
+        # flag-keyword    = "$MDNSent" / "$Forwarded" / "$Junk" /
+        #                   "$NotJunk" / "$Phishing" / atom
+        # flag-perm       = flag / "\*"
+        #
+        # Not checking for max one mbx-list-sflag in the parser.
+        # >>>
+        # mbx-list-oflag  = "\Noinferiors" / child-mbox-flag /
+        #                   "\Subscribed" / "\Remote" / flag-extension
+        #                    ; Other flags; multiple from this list are
+        #                    ; possible per LIST response, but each flag
+        #                    ; can only appear once per LIST response
+        # mbx-list-sflag  = "\NonExistent" / "\Noselect" / "\Marked" /
+        #                   "\Unmarked"
+        #                    ; Selectability flags; only one per LIST response
+        # child-mbox-flag =  "\HasChildren" / "\HasNoChildren"
+        #                    ; attributes for the CHILDREN return option, at most
+        #                    ; one possible per LIST response
+        FLAG              = /\\?#{ATOM}/n
+        FLAG_EXTENSION    = /\\#{ATOM}/n
+        FLAG_KEYWORD      = ATOM
+        FLAG_PERM         = Regexp.union(FLAG, "\\*")
+        MBX_FLAG          = FLAG_EXTENSION
+
+        # flag-list       = "(" [flag *(SP flag)] ")"
+        #
+        # part of resp-text-code:
+        # >>>
+        #   "PERMANENTFLAGS" SP "(" [flag-perm *(SP flag-perm)] ")"
+        #
+        # parens from mailbox-list are included in the regexp:
+        # >>>
+        #   mbx-list-flags  = *(mbx-list-oflag SP) mbx-list-sflag
+        #                     *(SP mbx-list-oflag) /
+        #                     mbx-list-oflag *(SP mbx-list-oflag)
+        FLAG_LIST      = /\G\((#{FLAG     }(?:\s#{FLAG     })*|)\)/ni
+        FLAG_PERM_LIST = /\G\((#{FLAG_PERM}(?:\s#{FLAG_PERM})*|)\)/ni
+        MBX_LIST_FLAGS = /\G\((#{MBX_FLAG }(?:\s#{MBX_FLAG })*|)\)/ni
+
         # RFC3501:
         #   QUOTED-CHAR   = <any TEXT-CHAR except quoted-specials> /
         #                   "\" quoted-specials
@@ -1218,18 +1266,21 @@ module Net
         end
       end
 
+      # mailbox-data    =  "FLAGS" SP flag-list / "LIST" SP mailbox-list /
+      #                    "LSUB" SP mailbox-list / "SEARCH" *(SP nz-number) /
+      #                    "STATUS" SP mailbox SP "(" [status-att-list] ")" /
+      #                    number SP "EXISTS" / number SP "RECENT"
+
       def mailbox_data__flags
-        token = match(T_ATOM)
-        name = token.value.upcase
-        match(T_SPACE)
-        return UntaggedResponse.new(name, flag_list, @str)
+        name = label("FLAGS")
+        SP!
+        UntaggedResponse.new(name, flag_list, @str)
       end
 
       def mailbox_data__list
-        token = match(T_ATOM)
-        name = token.value.upcase
-        match(T_SPACE)
-        return UntaggedResponse.new(name, mailbox_list, @str)
+        name = label_in("LIST", "LSUB", "XLIST")
+        SP!
+        UntaggedResponse.new(name, mailbox_list, @str)
       end
       alias mailbox_data__lsub  mailbox_data__list
       alias mailbox_data__xlist mailbox_data__list
@@ -1907,23 +1958,38 @@ module Net
         return Address.new(name, route, mailbox, host)
       end
 
-      FLAG_REGEXP = /\
-(?# FLAG        )\\([^\x80-\xff(){ \x00-\x1f\x7f%"\\]+)|\
-(?# ATOM        )([^\x80-\xff(){ \x00-\x1f\x7f%*"\\]+)/n
-
+      # flag-list       = "(" [flag *(SP flag)] ")"
       def flag_list
-        if @str.index(/\(([^)]*)\)/ni, @pos)
-          @pos = $~.end(0)
-          return $1.scan(FLAG_REGEXP).collect { |flag, atom|
-            if atom
-              atom
-            else
-              flag.capitalize.intern
-            end
-          }
-        else
-          parse_error("invalid flag list")
-        end
+        m = match_re(Patterns::FLAG_LIST, "flag-list")
+        m[1].scan(Patterns::FLAG).map {|flag|
+          flag.start_with?("\\") ? flag[1..].capitalize.to_sym : flag
+        }
+      end
+
+      #   "(" [flag-perm *(SP flag-perm)] ")"
+      def flag_perm__list
+        m = match_re(Patterns::FLAG_PERM_LIST, "PERMANENTFLAGS flag-perm list")
+        m[1].scan(Patterns::FLAG_PERM).map {|flag|
+          flag.start_with?("\\") ? flag[1..].capitalize.to_sym : flag
+        }
+      end
+
+      # Not checking for max one mbx-list-sflag in the parser.
+      # >>>
+      #   mbx-list-flags  = *(mbx-list-oflag SP) mbx-list-sflag
+      #                     *(SP mbx-list-oflag) /
+      #                     mbx-list-oflag *(SP mbx-list-oflag)
+      #   mbx-list-oflag  = "\Noinferiors" / child-mbox-flag /
+      #                     "\Subscribed" / "\Remote" / flag-extension
+      #                  ; Other flags; multiple from this list are
+      #                  ; possible per LIST response, but each flag
+      #                  ; can only appear once per LIST response
+      #   mbx-list-sflag  = "\NonExistent" / "\Noselect" / "\Marked" /
+      #                     "\Unmarked"
+      #                  ; Selectability flags; only one per LIST response
+      def parens__mbx_list_flags
+        m = match_re(Patterns::MBX_LIST_FLAGS, "mbx-list-flags")
+        m[1].scan(Patterns::ATOM).map { _1.capitalize.to_sym }
       end
 
       def x_gm_label; accept(T_BSLASH) ? atom.capitalize.to_sym : astring end
@@ -1935,8 +2001,6 @@ module Net
         rpar
         labels
       end
-
-      alias flag_perm__list flag_list # not quite correct
 
       # RFC7162:
       # mod-sequence-value  = 1*DIGIT
