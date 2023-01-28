@@ -600,8 +600,12 @@ class IMAPTest < Test::Unit::TestCase
         sock.gets
         sock.print("RUBY0004 OK TEST completed\r\n")
         sock.gets
+        sock.print("RUBY0005 OK TEST completed\r\n")
+        sock.gets
+        sock.print("RUBY0006 OK TEST completed\r\n")
+        sock.gets
         sock.print("* BYE terminating connection\r\n")
-        sock.print("RUBY0005 OK LOGOUT completed\r\n")
+        sock.print("RUBY0007 OK LOGOUT completed\r\n")
       ensure
         sock.close
         server.close
@@ -613,20 +617,19 @@ class IMAPTest < Test::Unit::TestCase
         imap.__send__(:send_command, "TEST", -1)
       end
       imap.__send__(:send_command, "TEST", 0)
-      imap.__send__(:send_command, "TEST", 4294967295)
+      imap.__send__(:send_command, "TEST", 2**32 - 1)
       assert_raise(Net::IMAP::DataFormatError) do
-        imap.__send__(:send_command, "TEST", 4294967296)
+        imap.__send__(:send_command, "TEST", 2**32)
       end
+      imap.__send__(:send_command, "TEST", Net::IMAP::SequenceSet.new(-1))
       assert_raise(Net::IMAP::DataFormatError) do
-        imap.__send__(:send_command, "TEST", Net::IMAP::MessageSet.new(-1))
+        imap.__send__(:send_command, "TEST", Net::IMAP::SequenceSet.new(0))
       end
+      imap.__send__(:send_command, "TEST", Net::IMAP::SequenceSet.new(1))
+      imap.__send__(:send_command, "TEST", Net::IMAP::SequenceSet.new(2**32-1))
+      imap.__send__(:send_command, "TEST", Net::IMAP::SequenceSet.new(2**32))
       assert_raise(Net::IMAP::DataFormatError) do
-        imap.__send__(:send_command, "TEST", Net::IMAP::MessageSet.new(0))
-      end
-      imap.__send__(:send_command, "TEST", Net::IMAP::MessageSet.new(1))
-      imap.__send__(:send_command, "TEST", Net::IMAP::MessageSet.new(4294967295))
-      assert_raise(Net::IMAP::DataFormatError) do
-        imap.__send__(:send_command, "TEST", Net::IMAP::MessageSet.new(4294967296))
+        imap.__send__(:send_command, "TEST", Net::IMAP::SequenceSet.new(2**32+1))
       end
       imap.logout
     ensure
