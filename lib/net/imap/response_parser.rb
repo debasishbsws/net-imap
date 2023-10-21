@@ -405,6 +405,14 @@ module Net
         parse_error("unexpected atom %p, expected %p instead", val, word)
       end
 
+      # Use #label or #label_in to assert specific known labels
+      # (+tagged-ext-label+ only, not +atom+).
+      def label_in(*labels)
+        lbl = tagged_ext_label and labels.include?(lbl) and return lbl
+        parse_error("unexpected atom %p, expected one of %s instead",
+                    lbl, labels.join(" or "))
+      end
+
       # expects "OK" or "PREAUTH" and raises InvalidResponseError on failure
       def resp_cond_auth__name
         lbl = tagged_ext_label and AUTH_CONDS.include? lbl and return lbl
