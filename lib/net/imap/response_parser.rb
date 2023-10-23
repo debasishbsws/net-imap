@@ -686,6 +686,7 @@ module Net
             when "MODSEQ"               then parens__modseq     # CONDSTORE
             when "EMAILID"              then parens__objectid   # OBJECTID  TODO:tests
             when "THREADID"             then nparens__objectid  # OBJECTID  TODO:tests
+            when "SAVEDATE"             then ndatetime          # SAVEDATE  TODO:tests, datetime
             else parse_error("unknown attribute `%s' for {%d}", name, n)
             end
           attr[name] = val
