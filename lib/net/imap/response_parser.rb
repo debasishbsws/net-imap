@@ -687,6 +687,7 @@ module Net
             when "EMAILID"              then parens__objectid   # OBJECTID  TODO:tests
             when "THREADID"             then nparens__objectid  # OBJECTID  TODO:tests
             when "SAVEDATE"             then ndatetime          # SAVEDATE  TODO:tests, datetime
+            when "PREVIEW"              then nstring            # PREVIEW   TODO:tests
             else parse_error("unknown attribute `%s' for {%d}", name, n)
             end
           attr[name] = val
