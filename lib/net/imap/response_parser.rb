@@ -688,6 +688,7 @@ module Net
             when "THREADID"             then nparens__objectid  # OBJECTID  TODO:tests
             when "SAVEDATE"             then ndatetime          # SAVEDATE  TODO:tests, datetime
             when "PREVIEW"              then nstring            # PREVIEW   TODO:tests
+            when "ANNOTATION"           then annotate__msgatt   # ANNOTATE  TODO:...
             else parse_error("unknown attribute `%s' for {%d}", name, n)
             end
           attr[name] = val
